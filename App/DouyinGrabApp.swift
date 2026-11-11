@@ -143,7 +143,7 @@ struct ContentView: View {
 enum FolderStore {
     private static let key = "saveFolderBookmark"
     static func save(_ url: URL) {
-        if let data = try? url.bookmarkData(options: .withSecurityScope,
+        if let data = try? url.bookmarkData(options: [],
                                             includingResourceValuesForKeys: nil,
                                             relativeTo: nil) {
             UserDefaults.standard.set(data.base64EncodedString(), forKey: key)
@@ -154,7 +154,7 @@ enum FolderStore {
               let data = Data(base64Encoded: s) else { return nil }
         var stale = false
         return try? URL(resolvingBookmarkData: data,
-                        options: .withSecurityScope,
+                        options: [],
                         relativeTo: nil,
                         bookmarkDataIsStale: &stale)
     }
