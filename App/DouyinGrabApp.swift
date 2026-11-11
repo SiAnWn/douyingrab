@@ -14,7 +14,7 @@ struct ContentView: View {
     @State private var input: String = ""
     @State private var status: String = "粘贴抖音分享链接或口令，点“解析并下载”"
     @State private var busy: Bool = false
-    @State private var shareURL: URL?
+    @State private var shareItem: ShareItem?
 
     var body: some View {
         NavigationStack {
@@ -42,8 +42,8 @@ struct ContentView: View {
                 }
             }
             .navigationTitle("抖音原画质")
-            .sheet(item: $shareURL) { url in
-                ActivityView(items: [url])
+            .sheet(item: $shareItem) { item in
+                ActivityView(items: [item.url])
                     .ignoresSafeArea()
             }
         }
@@ -67,7 +67,7 @@ struct ContentView: View {
             }
             status = "下载 \(best.width)x\(best.height)…"
             let file = try await svc.download(best.url)
-            shareURL = file
+            shareItem = ShareItem(url: file)
             status = "完成，点右上角“分享”存到文件/相册"
         } catch {
             status = "失败：\(error.localizedDescription)"
@@ -83,6 +83,7 @@ struct ActivityView: UIViewControllerRepresentable {
     func updateUIViewController(_ vc: UIActivityViewController, context: Context) {}
 }
 
-extension URL: Identifiable {
-    var id: String { absoluteString }
+struct ShareItem: Identifiable {
+    let id = UUID()
+    let url: URL
 }

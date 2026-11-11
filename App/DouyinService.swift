@@ -31,7 +31,7 @@ final class DouyinService: NSObject, WKScriptMessageHandler {
     // MARK: - 解析视频 ID（跟随短链跳转，读最终 URL）
     func resolveID(from text: String) async -> String? {
         guard let r = RegexHelper.range(text, pattern: "https?://[^\\s，,、]+"),
-              let url = URL(string: String(r)) else { return nil }
+              let url = URL(string: String(text[r])) else { return nil }
         var req = URLRequest(url: url)
         req.setValue(Self.ua, forHTTPHeaderField: "User-Agent")
         return await withCheckedContinuation { (c: CheckedContinuation<String?, Never>) in
