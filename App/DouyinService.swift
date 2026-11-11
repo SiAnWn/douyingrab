@@ -5,6 +5,7 @@ struct PickedVideo {
     let url: URL
     let width: Int
     let height: Int
+    let title: String
 }
 
 enum GError: LocalizedError {
@@ -112,7 +113,8 @@ final class DouyinService: NSObject, WKScriptMessageHandler {
         if let brs { for b in brs { add(b["play_addr"]) } }
         cands.sort { $0.score > $1.score }
         guard let top = cands.first else { return nil }
-        return PickedVideo(url: top.url, width: top.w, height: top.h)
+        let title = (det["desc"] as? String) ?? ""
+        return PickedVideo(url: top.url, width: top.w, height: top.h, title: title)
     }
 
     // MARK: - 下载
