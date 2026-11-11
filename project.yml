@@ -16,6 +16,11 @@ targets:
     platform: iOS
     sources:
       - App
+    entitlements:
+      path: Generated/DouyinGrab.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.sian.douyin
     info:
       path: Generated/Info.plist
       properties:

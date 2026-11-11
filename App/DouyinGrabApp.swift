@@ -145,21 +145,10 @@ struct ContentView: View {
             status = "下载 \(best.width)x\(best.height)…"
             let file = try await svc.download(best.url)
             let name = Self.safeFileName(best.author, best.title, w: best.width, h: best.height)
-
-            var saved = false
-            if let dir = FolderStore.load(), dir.startAccessingSecurityScopedResource() {
-                let dest = dir.appendingPathComponent(name)
-                try? FileManager.default.removeItem(at: dest)
-                do {
-                    try FileManager.default.copyItem(at: file, to: dest)
-                    status = "已保存到「\(dir.lastPathComponent)/\(name)」"
-                    saved = true
-                } catch { status = "写入目录失败：\(error.localizedDescription)" }
-                dir.stopAccessingSecurityScopedResource()
-            }
-            if !saved {
+            let res = Self.saveFile(file, name: name)
+            status = res.msg
+            if !res.ok {
                 shareItem = ShareItem(url: file)
-                status = "已下载，点右上角“分享”→存储到文件→选 SlidePlay 目录"
             }
 
             let item = HistoryItem(id: best.id.isEmpty ? id : best.id,
@@ -187,6 +176,29 @@ struct ContentView: View {
         if base.isEmpty { base = "douyin_\(w)x\(h)_\(Int(Date().timeIntervalSince1970))" }
         return base + ".mp4"
     }
+
+    static func saveFile(_ file: URL, name: String) -> (ok: Bool, msg: String) {
+        if let gc = SaveTargets.groupContainer() {
+            let dest = gc.appendingPathComponent(name)
+            try? FileManager.default.removeItem(at: dest)
+            if (try? FileManager.default.copyItem(at: file, to: dest)) != nil {
+                return (true, "已存入共享目录（SlidePlay 用同组即可读）：\(name)")
+            }
+        }
+        if let dir = FolderStore.load(), dir.startAccessingSecurityScopedResource() {
+            let dest = dir.appendingPathComponent(name)
+            try? FileManager.default.removeItem(at: dest)
+            let ok = (try? FileManager.default.copyItem(at: file, to: dest)) != nil
+            dir.stopAccessingSecurityScopedResource()
+            if ok { return (true, "已保存到「\(dir.lastPathComponent)/\(name)」") }
+        }
+        let dest = SaveTargets.ownDocuments().appendingPathComponent(name)
+        try? FileManager.default.removeItem(at: dest)
+        if (try? FileManager.default.copyItem(at: file, to: dest)) != nil {
+            return (false, "共享组不可用（常见于免费账号限制）。已存到 On My iPhone/DouyinGrab，并弹出分享：可手动“存储到文件”到 SlidePlay。")
+        }
+        return (false, "保存失败，已弹出分享。")
+    }
 }
 
 struct HistoryItem: Codable, Identifiable {
@@ -208,6 +220,16 @@ enum HistoryStore {
         if let d = try? JSONEncoder().encode(items) {
             UserDefaults.standard.set(d, forKey: key)
         }
+    }
+}
+
+enum SaveTargets {
+    static let groupID = "group.com.sian.douyin"
+    static func groupContainer() -> URL? {
+        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: groupID)
+    }
+    static func ownDocuments() -> URL {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
     }
 }
 
