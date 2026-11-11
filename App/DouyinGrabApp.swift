@@ -19,6 +19,7 @@ struct ContentView: View {
     @State private var showFolderPicker: Bool = false
     @State private var chosenName: String = ""
     @State private var history: [HistoryItem] = []
+    @State private var groupOK: Bool = false
 
     var body: some View {
         NavigationStack {
@@ -59,6 +60,9 @@ struct ContentView: View {
                 }
 
                 Section("保存目录（可选）") {
+                    Text("共享容器：\(groupOK ? "可用 ✅（存完 SlidePlay 直接能播）" : "不可用 ❌（签名 profile 未含该组，走手动分享）")")
+                        .font(.footnote)
+                        .foregroundStyle(groupOK ? Color.green : Color.orange)
                     Button { showFolderPicker = true } label: { Text("选择文件夹…") }
                     if chosenName.isEmpty {
                         Text("未设置则用系统分享面板。注意：iOS 不允许选到别的 app 的目录。")
@@ -103,6 +107,7 @@ struct ContentView: View {
             .onAppear {
                 chosenName = FolderStore.load()?.lastPathComponent ?? ""
                 history = HistoryStore.load()
+                groupOK = SaveTargets.groupContainer() != nil
             }
             .fileImporter(isPresented: $showFolderPicker,
                           allowedContentTypes: [.folder],
