@@ -229,7 +229,7 @@ enum HistoryStore {
 }
 
 enum SaveTargets {
-    static let groupID = "group.com.sian.douyin"
+    static let groupID = "group.0c4608c7ade308d7.1"
     static func groupContainer() -> URL? {
         FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: groupID)
     }

@@ -20,7 +20,7 @@ targets:
       path: Generated/DouyinGrab.entitlements
       properties:
         com.apple.security.application-groups:
-          - group.com.sian.douyin
+          - group.0c4608c7ade308d7.1
     info:
       path: Generated/Info.plist
       properties:
