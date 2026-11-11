@@ -6,6 +6,8 @@ struct PickedVideo {
     let width: Int
     let height: Int
     let title: String
+    let author: String
+    let id: String
 }
 
 enum GError: LocalizedError {
@@ -114,7 +116,9 @@ final class DouyinService: NSObject, WKScriptMessageHandler {
         cands.sort { $0.score > $1.score }
         guard let top = cands.first else { return nil }
         let title = (det["desc"] as? String) ?? ""
-        return PickedVideo(url: top.url, width: top.w, height: top.h, title: title)
+        let author = ((det["author"] as? [String: Any])?["nickname"] as? String) ?? ""
+        let vid = (det["aweme_id"] as? String) ?? ""
+        return PickedVideo(url: top.url, width: top.w, height: top.h, title: title, author: author, id: vid)
     }
 
     // MARK: - 下载
