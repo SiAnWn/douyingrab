@@ -16,6 +16,7 @@ struct ContentView: View {
     @State private var progress: Double = 0
     @State private var speedText: String = ""
     @State private var showProgress: Bool = false
+    @State private var quota = Quota.zero
     @FocusState private var linkFocused: Bool
 
     var body: some View {
@@ -51,6 +52,12 @@ struct ContentView: View {
                     }
                 }
 
+                Section("接口配额") {
+                    Text("本分钟 \(quota.minute)/\(CallStats.limits.minute)　本小时 \(quota.hour)/\(CallStats.limits.hour)")
+                    Text("今日 \(quota.day)/\(CallStats.limits.day)　本月 \(quota.month)/\(CallStats.limits.month)")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+
                 if !history.isEmpty {
                     Section {
                         ForEach(history) { item in
@@ -82,7 +89,7 @@ struct ContentView: View {
                 }
             }
             .navigationTitle("抖音原画质")
-            .onAppear { history = HistoryStore.load() }
+            .onAppear { history = HistoryStore.load(); refreshQuota() }
             .sheet(item: $result) { res in
                 QualitySheet(
                     result: res,
@@ -95,15 +102,28 @@ struct ContentView: View {
 
     @MainActor
     private func doParse(link: String) async {
+        if let reason = CallStats.blockReason() {
+            refreshQuota()
+            status = "已达限制：\(reason)"
+            return
+        }
         busy = true; defer { busy = false }
         do {
             status = "解析中…"
             result = try await DouyinAPI.parse(link: link)
+            CallStats.record(); refreshQuota()
             status = "选一个清晰度下载"
         } catch {
-            status = "失败：\(error.localizedDescription)"
+            CallStats.record(); refreshQuota()
+            if let g = error as? GError, case .http(429) = g {
+                status = "已达频率限制(429)，请稍后再试"
+            } else {
+                status = "失败：\(error.localizedDescription)"
+            }
         }
     }
+
+    private func refreshQuota() { quota = CallStats.current() }
 
     @MainActor
     private func pick(_ res: ParseResult, _ opt: QualityOption) async {

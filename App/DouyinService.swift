@@ -176,3 +176,51 @@ final class Downloader: NSObject, URLSessionDownloadDelegate {
         }
     }
 }
+
+struct Quota: Equatable {
+    var minute = 0, hour = 0, day = 0, month = 0
+    static let zero = Quota()
+}
+
+enum CallStats {
+    static let limits = (minute: 15, hour: 600, day: 8000, month: 150000)
+    private static let key = "apiCallCounts"
+
+    private static func bucketKeys(_ now: Date = Date()) -> (String, String, String, String) {
+        let c = Calendar(identifier: .gregorian).dateComponents([.year, .month, .day, .hour, .minute], from: now)
+        let ymdhm = String(format: "%04d%02d%02d%02d%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0, c.hour ?? 0, c.minute ?? 0)
+        let s = Array(ymdhm)
+        let minuteKey = "m_" + String(s[0..<12])
+        let hourKey = "h_" + String(s[0..<10])
+        let dayKey = "d_" + String(s[0..<8])
+        let monthKey = "mo_" + String(s[0..<6])
+        return (minuteKey, hourKey, dayKey, monthKey)
+    }
+
+    static func current() -> Quota {
+        let dict = (UserDefaults.standard.dictionary(forKey: key) as? [String: Int]) ?? [:]
+        let k = bucketKeys()
+        var q = Quota()
+        q.minute = dict[k.0] ?? 0
+        q.hour = dict[k.1] ?? 0
+        q.day = dict[k.2] ?? 0
+        q.month = dict[k.3] ?? 0
+        return q
+    }
+
+    static func record() {
+        let q = current()
+        let k = bucketKeys()
+        let nd = [k.0: q.minute + 1, k.1: q.hour + 1, k.2: q.day + 1, k.3: q.month + 1]
+        UserDefaults.standard.set(nd, forKey: key)
+    }
+
+    static func blockReason() -> String? {
+        let q = current()
+        if q.minute >= limits.minute { return "本分钟已解析 \(q.minute)/\(limits.minute) 次，请等下一分钟" }
+        if q.hour >= limits.hour { return "本小时已达 \(limits.hour) 次，稍后再试" }
+        if q.day >= limits.day { return "今日已达 \(limits.day) 次，明天再试" }
+        if q.month >= limits.month { return "本月已达 \(limits.month) 次，下月再试" }
+        return nil
+    }
+}
