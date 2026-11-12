@@ -1,6 +1,4 @@
 import SwiftUI
-import UIKit
-import UniformTypeIdentifiers
 
 @main
 struct DouyinGrabApp: App {
@@ -13,13 +11,9 @@ struct DouyinGrabApp: App {
 
 struct ContentView: View {
     @State private var input: String = ""
-    @State private var status: String = "粘贴抖音分享链接或口令，点“解析并下载”"
+    @State private var status: String = "粘贴抖音分享链接或口令，点“解析并下载”。视频会存到 文件App › 我的iPhone › DouyinGrab"
     @State private var busy: Bool = false
-    @State private var shareItem: ShareItem?
-    @State private var showFolderPicker: Bool = false
-    @State private var chosenName: String = ""
     @State private var history: [HistoryItem] = []
-    @State private var groupOK: Bool = false
 
     var body: some View {
         NavigationStack {
@@ -30,10 +24,9 @@ struct ContentView: View {
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
                         if !input.isEmpty {
-                            Button {
-                                input = ""
-                            } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
-                                .buttonStyle(.borderless)
+                            Button { input = "" } label: {
+                                Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                            }.buttonStyle(.borderless)
                         }
                     }
                 }
@@ -59,23 +52,6 @@ struct ContentView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                Section("保存目录（可选）") {
-                    Text("共享容器：\(groupOK ? "可用 ✅（存完 SlidePlay 直接能播）" : "不可用 ❌（签名 profile 未含该组，走手动分享）")")
-                        .font(.footnote)
-                        .foregroundStyle(groupOK ? Color.green : Color.orange)
-                    Button { showFolderPicker = true } label: { Text("选择文件夹…") }
-                    if chosenName.isEmpty {
-                        Text("未设置则用系统分享面板。注意：iOS 不允许选到别的 app 的目录。")
-                            .font(.footnote).foregroundStyle(.secondary)
-                    } else {
-                        HStack {
-                            Text("当前：\(chosenName)").font(.footnote).foregroundStyle(.secondary)
-                            Spacer()
-                            Button("清除") { FolderStore.clear(); chosenName = "" }.font(.footnote)
-                        }
-                    }
-                }
-
                 if !history.isEmpty {
                     Section {
                         ForEach(history) { item in
@@ -95,8 +71,7 @@ struct ContentView: View {
                         HStack {
                             Text("解析历史（\(history.count)）")
                             Spacer()
-                            Button("清空") { history = []; HistoryStore.save([]) }
-                                .font(.caption)
+                            Button("清空") { history = []; HistoryStore.save([]) }.font(.caption)
                         }
                     }
                     footer: { Text("点一条可重新下载。已解析过的链接不会重复下载。")
@@ -104,30 +79,7 @@ struct ContentView: View {
                 }
             }
             .navigationTitle("抖音原画质")
-            .onAppear {
-                chosenName = FolderStore.load()?.lastPathComponent ?? ""
-                history = HistoryStore.load()
-                groupOK = SaveTargets.groupContainer() != nil
-            }
-            .fileImporter(isPresented: $showFolderPicker,
-                          allowedContentTypes: [.folder],
-                          allowsMultipleSelection: false) { res in
-                switch res {
-                case .success(let urls):
-                    if let url = urls.first {
-                        let ok = url.startAccessingSecurityScopedResource()
-                        FolderStore.save(url)
-                        if ok { url.stopAccessingSecurityScopedResource() }
-                        chosenName = url.lastPathComponent
-                        status = "已设置保存目录：\(url.lastPathComponent)"
-                    }
-                case .failure(let e):
-                    status = "选择目录失败：\(e.localizedDescription)"
-                }
-            }
-            .sheet(item: $shareItem) { item in
-                ActivityView(items: [item.url]).ignoresSafeArea()
-            }
+            .onAppear { history = HistoryStore.load() }
         }
     }
 
@@ -150,11 +102,7 @@ struct ContentView: View {
             status = "下载 \(best.width)x\(best.height)…"
             let file = try await svc.download(best.url)
             let name = Self.safeFileName(best.author, best.title, w: best.width, h: best.height)
-            let res = Self.saveFile(file, name: name)
-            status = res.msg
-            if !res.ok {
-                shareItem = ShareItem(url: file)
-            }
+            status = Self.saveToDocuments(file, name: name)
 
             let item = HistoryItem(id: best.id.isEmpty ? id : best.id,
                                    title: best.title, author: best.author,
@@ -166,6 +114,16 @@ struct ContentView: View {
         } catch {
             status = "失败：\(error.localizedDescription)"
         }
+    }
+
+    static func saveToDocuments(_ file: URL, name: String) -> String {
+        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let dest = dir.appendingPathComponent(name)
+        try? FileManager.default.removeItem(at: dest)
+        if (try? FileManager.default.copyItem(at: file, to: dest)) != nil {
+            return "已保存到 文件App › 我的iPhone › DouyinGrab › \(name)"
+        }
+        return "保存失败：无法写入自己的目录"
     }
 
     static func safeFileName(_ author: String, _ title: String, w: Int, h: Int) -> String {
@@ -180,29 +138,6 @@ struct ContentView: View {
         if base.count > 48 { base = String(base.prefix(48)) }
         if base.isEmpty { base = "douyin_\(w)x\(h)_\(Int(Date().timeIntervalSince1970))" }
         return base + ".mp4"
-    }
-
-    static func saveFile(_ file: URL, name: String) -> (ok: Bool, msg: String) {
-        if let gc = SaveTargets.groupContainer() {
-            let dest = gc.appendingPathComponent(name)
-            try? FileManager.default.removeItem(at: dest)
-            if (try? FileManager.default.copyItem(at: file, to: dest)) != nil {
-                return (true, "已存入共享目录（SlidePlay 用同组即可读）：\(name)")
-            }
-        }
-        if let dir = FolderStore.load(), dir.startAccessingSecurityScopedResource() {
-            let dest = dir.appendingPathComponent(name)
-            try? FileManager.default.removeItem(at: dest)
-            let ok = (try? FileManager.default.copyItem(at: file, to: dest)) != nil
-            dir.stopAccessingSecurityScopedResource()
-            if ok { return (true, "已保存到「\(dir.lastPathComponent)/\(name)」") }
-        }
-        let dest = SaveTargets.ownDocuments().appendingPathComponent(name)
-        try? FileManager.default.removeItem(at: dest)
-        if (try? FileManager.default.copyItem(at: file, to: dest)) != nil {
-            return (false, "共享组不可用（常见于免费账号限制）。已存到 On My iPhone/DouyinGrab，并弹出分享：可手动“存储到文件”到 SlidePlay。")
-        }
-        return (false, "保存失败，已弹出分享。")
     }
 }
 
@@ -226,46 +161,4 @@ enum HistoryStore {
             UserDefaults.standard.set(d, forKey: key)
         }
     }
-}
-
-enum SaveTargets {
-    static let groupID = "group.0c4608c7ade308d7.1"
-    static func groupContainer() -> URL? {
-        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: groupID)
-    }
-    static func ownDocuments() -> URL {
-        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-    }
-}
-
-enum FolderStore {
-    private static let key = "saveFolderBookmark"
-    static func save(_ url: URL) {
-        if let data = try? url.bookmarkData(options: [],
-                                            includingResourceValuesForKeys: nil,
-                                            relativeTo: nil) {
-            UserDefaults.standard.set(data.base64EncodedString(), forKey: key)
-        }
-    }
-    static func load() -> URL? {
-        guard let s = UserDefaults.standard.string(forKey: key),
-              let data = Data(base64Encoded: s) else { return nil }
-        var stale = false
-        return try? URL(resolvingBookmarkData: data, options: [],
-                        relativeTo: nil, bookmarkDataIsStale: &stale)
-    }
-    static func clear() { UserDefaults.standard.removeObject(forKey: key) }
-}
-
-struct ShareItem: Identifiable {
-    let id = UUID()
-    let url: URL
-}
-
-struct ActivityView: UIViewControllerRepresentable {
-    let items: [Any]
-    func makeUIViewController(context: Context) -> UIActivityViewController {
-        UIActivityViewController(activityItems: items, applicationActivities: nil)
-    }
-    func updateUIViewController(_ vc: UIActivityViewController, context: Context) {}
 }

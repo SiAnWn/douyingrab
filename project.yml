@@ -16,11 +16,6 @@ targets:
     platform: iOS
     sources:
       - App
-    entitlements:
-      path: Generated/DouyinGrab.entitlements
-      properties:
-        com.apple.security.application-groups:
-          - group.0c4608c7ade308d7.1
     info:
       path: Generated/Info.plist
       properties:
@@ -30,6 +25,8 @@ targets:
           - CFBundleURLName: com.sian.douyingrab
             CFBundleURLSchemes:
               - douyingrab
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
