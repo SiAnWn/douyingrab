@@ -17,6 +17,10 @@ struct ContentView: View {
     @State private var speedText: String = ""
     @State private var showProgress: Bool = false
     @State private var quota = Quota.zero
+    @State private var qMin = ""
+    @State private var qHour = ""
+    @State private var qDay = ""
+    @State private var qMonth = ""
     @FocusState private var linkFocused: Bool
 
     var body: some View {
@@ -52,10 +56,11 @@ struct ContentView: View {
                     }
                 }
 
-                Section("接口配额") {
-                    Text("本分钟 \(quota.minute)/\(CallStats.limits.minute)　本小时 \(quota.hour)/\(CallStats.limits.hour)")
-                    Text("今日 \(quota.day)/\(CallStats.limits.day)　本月 \(quota.month)/\(CallStats.limits.month)")
-                        .font(.footnote).foregroundStyle(.secondary)
+                Section("接口配额（可手动校正，app 自动累加本机调用）") {
+                    quotaRow("本分钟", $qMin, .minute, CallStats.limits.minute)
+                    quotaRow("本小时", $qHour, .hour, CallStats.limits.hour)
+                    quotaRow("今日", $qDay, .day, CallStats.limits.day)
+                    quotaRow("本月", $qMonth, .month, CallStats.limits.month)
                 }
 
                 if !history.isEmpty {
@@ -123,7 +128,28 @@ struct ContentView: View {
         }
     }
 
-    private func refreshQuota() { quota = CallStats.current() }
+    private func refreshQuota() {
+        let q = CallStats.current()
+        quota = q
+        qMin = "\(q.minute)"; qHour = "\(q.hour)"; qDay = "\(q.day)"; qMonth = "\(q.month)"
+    }
+
+    @ViewBuilder
+    private func quotaRow(_ label: String, _ text: Binding<String>, _ w: CallStats.Window, _ limit: Int) -> some View {
+        HStack {
+            Text(label)
+            Spacer()
+            TextField("0", text: text)
+                .keyboardType(.numberPad)
+                .multilineTextAlignment(.trailing)
+                .frame(width: 72)
+                .border(Color.secondary.opacity(0.35), width: 1)
+            Text("/\(limit)").font(.footnote).foregroundStyle(.secondary)
+        }
+        .onChange(of: text.wrappedValue) { nv in
+            if let v = Int(nv) { CallStats.set(w, v); quota = CallStats.current() }
+        }
+    }
 
     @MainActor
     private func pick(_ res: ParseResult, _ opt: QualityOption) async {

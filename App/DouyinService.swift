@@ -223,4 +223,20 @@ enum CallStats {
         if q.month >= limits.month { return "本月已达 \(limits.month) 次，下月再试" }
         return nil
     }
+
+    enum Window { case minute, hour, day, month }
+
+    static func set(_ w: Window, _ value: Int) {
+        var dict = (UserDefaults.standard.dictionary(forKey: key) as? [String: Int]) ?? [:]
+        let k = bucketKeys()
+        let target: String
+        switch w {
+        case .minute: target = k.0
+        case .hour: target = k.1
+        case .day: target = k.2
+        case .month: target = k.3
+        }
+        dict[target] = max(0, value)
+        UserDefaults.standard.set(dict, forKey: key)
+    }
 }
