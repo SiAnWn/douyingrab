@@ -13,6 +13,9 @@ struct ContentView: View {
     @State private var busy: Bool = false
     @State private var history: [HistoryItem] = []
     @State private var result: ParseResult?
+    @State private var progress: Double = 0
+    @State private var speedText: String = ""
+    @State private var showProgress: Bool = false
     @FocusState private var linkFocused: Bool
 
     var body: some View {
@@ -41,6 +44,11 @@ struct ContentView: View {
                     }
                     .disabled(busy)
                     Text(status).font(.footnote).foregroundStyle(.secondary)
+                    if showProgress {
+                        ProgressView(value: min(max(progress, 0), 1))
+                        Text("\(Int(progress * 100))% · \(speedText)")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
                 }
 
                 if !history.isEmpty {
@@ -104,7 +112,14 @@ struct ContentView: View {
         busy = true; defer { busy = false }
         do {
             status = "下载 \(opt.label)…"
-            let file = try await DouyinAPI.download(opt.url)
+            showProgress = true; progress = 0; speedText = ""
+            let file = try await DouyinAPI.download(opt.url) { frac, sps in
+                Task { @MainActor in
+                    self.progress = frac
+                    self.speedText = Self.fmtSpeed(sps)
+                }
+            }
+            showProgress = false
             let name = Self.fileName(res.author, res.title, opt)
             if SavePaths.write(file, name: name) {
                 DownloadStore.set(dkey, name)
@@ -114,6 +129,7 @@ struct ContentView: View {
                 status = "保存失败：无法写入目录"
             }
         } catch {
+            showProgress = false
             status = "下载失败：\(error.localizedDescription)"
         }
     }
@@ -146,6 +162,12 @@ struct ContentView: View {
         if base.count > 60 { base = String(base.prefix(60)) }
         if base.isEmpty { base = "douyin_\(opt.width)x\(opt.height)_\(Int(Date().timeIntervalSince1970))" }
         return base + ".mp4"
+    }
+
+    static func fmtSpeed(_ bps: Double) -> String {
+        if bps <= 0 { return "计算中…" }
+        if bps >= 1048576 { return String(format: "%.1f MB/s", bps / 1048576.0) }
+        return String(format: "%.0f KB/s", bps / 1024.0)
     }
 }
 
