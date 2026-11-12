@@ -3,17 +3,16 @@ import SwiftUI
 @main
 struct DouyinGrabApp: App {
     var body: some Scene {
-        WindowGroup {
-            ContentView()
-        }
+        WindowGroup { ContentView() }
     }
 }
 
 struct ContentView: View {
     @State private var input: String = ""
-    @State private var status: String = "粘贴抖音分享链接或口令，点“解析并下载”。视频会存到 文件App › 我的iPhone › DouyinGrab"
+    @State private var status: String = "粘贴抖音链接 → 选清晰度 → 自动存到 文件App › 我的iPhone › DouyinGrab"
     @State private var busy: Bool = false
     @State private var history: [HistoryItem] = []
+    @State private var result: ParseResult?
     @FocusState private var linkFocused: Bool
 
     var body: some View {
@@ -36,23 +35,12 @@ struct ContentView: View {
                 Section {
                     Button {
                         linkFocused = false
-                        Task {
-                            guard let id = await DouyinService().resolveID(from: input) else {
-                                status = GError.noID.errorDescription ?? "解析失败"; return
-                            }
-                            await process(id: id, force: false)
-                        }
+                        Task { await doParse(link: input) }
                     } label: {
-                        HStack {
-                            if busy { ProgressView() }
-                            Text(busy ? "处理中…" : "解析并下载")
-                        }
+                        HStack { if busy { ProgressView() }; Text(busy ? "处理中…" : "解析 / 选清晰度") }
                     }
                     .disabled(busy)
-
-                    Text(status)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                    Text(status).font(.footnote).foregroundStyle(.secondary)
                 }
 
                 if !history.isEmpty {
@@ -60,7 +48,7 @@ struct ContentView: View {
                         ForEach(history) { item in
                             Button {
                                 linkFocused = false
-                                Task { await process(id: item.id, force: true) }
+                                Task { await doParse(link: "https://www.douyin.com/video/\(item.id)") }
                             } label: {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text("\(item.author.isEmpty ? "抖音" : item.author) · \(item.title.isEmpty ? item.id : item.title)")
@@ -72,75 +60,84 @@ struct ContentView: View {
                             .foregroundStyle(.primary)
                         }
                     } header: {
-                        HStack {
-                            Text("解析历史（\(history.count)）")
-                            Spacer()
-                            Button("清空") { history = []; HistoryStore.save([]) }.font(.caption)
-                        }
+                        HStack { Text("解析历史（\(history.count)）"); Spacer()
+                            Button("清空") { history = []; HistoryStore.save([]) }.font(.caption) }
                     }
-                    footer: { Text("点一条可强制重新下载。清历史不影响“防重复下载”。")
+                    footer: { Text("点一条可重新选清晰度下载。")
                         .font(.caption).foregroundStyle(.secondary) }
                 }
             }
             .scrollDismissesKeyboard(.interactively)
             .toolbar {
                 ToolbarItem(placement: .keyboard) {
-                    HStack {
-                        Spacer()
-                        Button("收起键盘") { linkFocused = false }
-                    }
+                    HStack { Spacer(); Button("收起键盘") { linkFocused = false } }
                 }
             }
             .navigationTitle("抖音原画质")
             .onAppear { history = HistoryStore.load() }
+            .sheet(item: $result) { res in
+                QualitySheet(
+                    result: res,
+                    downloaded: { opt in isDownloaded(res, opt) },
+                    onPick: { opt in Task { await pick(res, opt) } }
+                )
+            }
         }
     }
 
     @MainActor
-    private func process(id: String, force: Bool) async {
-        // B：按“视频ID + 文件是否存在”去重（与可见历史无关）
-        if !force, let known = DownloadStore.map()[id] {
-            if SavePaths.exists(known) {
-                status = "已下载过（文件还在）：\(known)，去 文件App 里看"
-                return
-            } else {
-                status = "之前下载过，但文件已不在，正在重新下载…"
-            }
-        }
-        busy = true
-        defer { busy = false }
+    private func doParse(link: String) async {
+        busy = true; defer { busy = false }
         do {
-            status = "打开页面取接口（约10秒）…"
-            let svc = DouyinService()
-            let data = try await svc.fetchDetail(id: id)
-            status = "挑选最高画质…"
-            guard let best = svc.pickBest(data) else {
-                status = GError.noStream.errorDescription ?? "无可用流"; return
-            }
-            status = "下载 \(best.width)x\(best.height)…"
-            let file = try await svc.download(best.url)
-            let name = Self.safeFileName(best.author, best.title, w: best.width, h: best.height)
-            let ok = SavePaths.write(file, name: name)
-            if ok {
-                DownloadStore.set(id, name)
-                status = "已保存到 文件App › 我的iPhone › DouyinGrab › \(name)"
-            } else {
-                status = "保存失败：无法写入自己的目录"; return
-            }
-
-            let item = HistoryItem(id: best.id.isEmpty ? id : best.id,
-                                   title: best.title, author: best.author,
-                                   date: Date(), filename: name)
-            history.removeAll { $0.id == item.id }
-            history.insert(item, at: 0)
-            if history.count > 100 { history = Array(history.prefix(100)) }
-            HistoryStore.save(history)
+            status = "解析中…"
+            result = try await DouyinAPI.parse(link: link)
+            status = "选一个清晰度下载"
         } catch {
             status = "失败：\(error.localizedDescription)"
         }
     }
 
-    static func safeFileName(_ author: String, _ title: String, w: Int, h: Int) -> String {
+    @MainActor
+    private func pick(_ res: ParseResult, _ opt: QualityOption) async {
+        let dkey = "\(res.videoID)|\(opt.label)"
+        if let fn = DownloadStore.map()[dkey], SavePaths.exists(fn) {
+            result = nil
+            status = "已下载过：\(fn)，去 文件App 里看"
+            return
+        }
+        result = nil
+        busy = true; defer { busy = false }
+        do {
+            status = "下载 \(opt.label)…"
+            let file = try await DouyinAPI.download(opt.url)
+            let name = Self.fileName(res.author, res.title, opt)
+            if SavePaths.write(file, name: name) {
+                DownloadStore.set(dkey, name)
+                status = "已保存到 文件App › 我的iPhone › DouyinGrab › \(name)"
+                recordHistory(res)
+            } else {
+                status = "保存失败：无法写入目录"
+            }
+        } catch {
+            status = "下载失败：\(error.localizedDescription)"
+        }
+    }
+
+    private func isDownloaded(_ res: ParseResult, _ opt: QualityOption) -> Bool {
+        guard let fn = DownloadStore.map()["\(res.videoID)|\(opt.label)"] else { return false }
+        return SavePaths.exists(fn)
+    }
+
+    private func recordHistory(_ res: ParseResult) {
+        let item = HistoryItem(id: res.videoID, title: res.title, author: res.author,
+                               date: Date(), filename: "")
+        history.removeAll { $0.id == item.id }
+        history.insert(item, at: 0)
+        if history.count > 100 { history = Array(history.prefix(100)) }
+        HistoryStore.save(history)
+    }
+
+    static func fileName(_ author: String, _ title: String, _ opt: QualityOption) -> String {
         let illegal = CharacterSet(charactersIn: "\\/:*?\"<>|\n\r\t")
         func clean(_ s: String) -> String {
             var t = s.components(separatedBy: illegal).joined(separator: " ")
@@ -149,34 +146,53 @@ struct ContentView: View {
         }
         let a = clean(author), c = clean(title)
         var base = [a, c].filter { !$0.isEmpty }.joined(separator: " ")
-        if base.count > 48 { base = String(base.prefix(48)) }
-        if base.isEmpty { base = "douyin_\(w)x\(h)_\(Int(Date().timeIntervalSince1970))" }
+        let tag = clean(opt.label).replacingOccurrences(of: "（最高画质）", with: "")
+        if !tag.isEmpty { base += "_" + tag }
+        if base.count > 60 { base = String(base.prefix(60)) }
+        if base.isEmpty { base = "douyin_\(opt.width)x\(opt.height)_\(Int(Date().timeIntervalSince1970))" }
         return base + ".mp4"
     }
 }
 
-enum SavePaths {
-    static var dir: URL {
-        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-    }
-    static func exists(_ name: String) -> Bool {
-        FileManager.default.fileExists(atPath: dir.appendingPathComponent(name).path)
-    }
-    static func write(_ file: URL, name: String) -> Bool {
-        let dest = dir.appendingPathComponent(name)
-        try? FileManager.default.removeItem(at: dest)
-        return (try? FileManager.default.copyItem(at: file, to: dest)) != nil
-    }
-}
+struct QualitySheet: View {
+    let result: ParseResult
+    let downloaded: (QualityOption) -> Bool
+    let onPick: (QualityOption) -> Void
+    @Environment(\.dismiss) private var dismiss
 
-enum DownloadStore {
-    private static let key = "downloadedMap"
-    static func map() -> [String: String] {
-        (UserDefaults.standard.dictionary(forKey: key) as? [String: String]) ?? [:]
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    ForEach(Array(result.options.enumerated()), id: \.offset) { _, opt in
+                        Button { onPick(opt) } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(opt.label + (opt.isOriginal ? "  ⭐" : "")).font(.body)
+                                    Text("\(opt.width)×\(opt.height) · \(Self.size(opt.sizeBytes))")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                if downloaded(opt) { Text("已下载").font(.caption).foregroundStyle(.green) }
+                            }
+                        }
+                        .foregroundStyle(.primary)
+                    }
+                } header: {
+                    Text("\(result.author.isEmpty ? "" : result.author + " · ")\(result.title)")
+                        .font(.caption).lineLimit(2)
+                }
+            }
+            .navigationTitle("选择清晰度")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
+            }
+        }
     }
-    static func set(_ id: String, _ name: String) {
-        var m = map(); m[id] = name
-        UserDefaults.standard.set(m, forKey: key)
+
+    static func size(_ b: Int) -> String {
+        b > 0 ? String(format: "%.1f MB", Double(b) / 1048576.0) : "大小未知"
     }
 }
 
@@ -196,8 +212,28 @@ enum HistoryStore {
         return arr
     }
     static func save(_ items: [HistoryItem]) {
-        if let d = try? JSONEncoder().encode(items) {
-            UserDefaults.standard.set(d, forKey: key)
-        }
+        if let d = try? JSONEncoder().encode(items) { UserDefaults.standard.set(d, forKey: key) }
+    }
+}
+
+enum SavePaths {
+    static var dir: URL { FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0] }
+    static func exists(_ name: String) -> Bool {
+        FileManager.default.fileExists(atPath: dir.appendingPathComponent(name).path)
+    }
+    static func write(_ file: URL, name: String) -> Bool {
+        let dest = dir.appendingPathComponent(name)
+        try? FileManager.default.removeItem(at: dest)
+        return (try? FileManager.default.copyItem(at: file, to: dest)) != nil
+    }
+}
+
+enum DownloadStore {
+    private static let key = "downloadedMap"
+    static func map() -> [String: String] {
+        (UserDefaults.standard.dictionary(forKey: key) as? [String: String]) ?? [:]
+    }
+    static func set(_ k: String, _ name: String) {
+        var m = map(); m[k] = name; UserDefaults.standard.set(m, forKey: key)
     }
 }
