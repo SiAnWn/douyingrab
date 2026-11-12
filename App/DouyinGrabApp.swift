@@ -100,11 +100,6 @@ struct ContentView: View {
     @MainActor
     private func pick(_ res: ParseResult, _ opt: QualityOption) async {
         let dkey = "\(res.videoID)|\(opt.label)"
-        if let fn = DownloadStore.map()[dkey], SavePaths.exists(fn) {
-            result = nil
-            status = "已下载过：\(fn)，去 文件App 里看"
-            return
-        }
         result = nil
         busy = true; defer { busy = false }
         do {
@@ -159,13 +154,16 @@ struct QualitySheet: View {
     let downloaded: (QualityOption) -> Bool
     let onPick: (QualityOption) -> Void
     @Environment(\.dismiss) private var dismiss
+    @State private var confirmOpt: QualityOption?
 
     var body: some View {
         NavigationStack {
             List {
                 Section {
                     ForEach(Array(result.options.enumerated()), id: \.offset) { _, opt in
-                        Button { onPick(opt) } label: {
+                        Button {
+                            if downloaded(opt) { confirmOpt = opt } else { onPick(opt) }
+                        } label: {
                             HStack {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(opt.label + (opt.isOriginal ? "  ⭐" : "")).font(.body)
@@ -182,6 +180,15 @@ struct QualitySheet: View {
                     Text("\(result.author.isEmpty ? "" : result.author + " · ")\(result.title)")
                         .font(.caption).lineLimit(2)
                 }
+            }
+            .alert("已经下载过",
+                   isPresented: Binding(get: { confirmOpt != nil },
+                                       set: { if !$0 { confirmOpt = nil } }),
+                   presenting: confirmOpt) { opt in
+                Button("取消", role: .cancel) {}
+                Button("重新下载") { onPick(opt) }
+            } message: { _ in
+                Text("这个清晰度之前已下载过，要重新下载吗？")
             }
             .navigationTitle("选择清晰度")
             .navigationBarTitleDisplayMode(.inline)
