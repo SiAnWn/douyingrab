@@ -14,6 +14,7 @@ struct ContentView: View {
     @State private var status: String = "粘贴抖音分享链接或口令，点“解析并下载”。视频会存到 文件App › 我的iPhone › DouyinGrab"
     @State private var busy: Bool = false
     @State private var history: [HistoryItem] = []
+    @FocusState private var linkFocused: Bool
 
     var body: some View {
         NavigationStack {
@@ -23,6 +24,7 @@ struct ContentView: View {
                         TextField("抖音链接 / 分享口令", text: $input)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
+                            .focused($linkFocused)
                         if !input.isEmpty {
                             Button { input = "" } label: {
                                 Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
@@ -33,6 +35,7 @@ struct ContentView: View {
 
                 Section {
                     Button {
+                        linkFocused = false
                         Task {
                             guard let id = await DouyinService().resolveID(from: input) else {
                                 status = GError.noID.errorDescription ?? "解析失败"; return
@@ -56,6 +59,7 @@ struct ContentView: View {
                     Section {
                         ForEach(history) { item in
                             Button {
+                                linkFocused = false
                                 Task { await process(id: item.id, force: true) }
                             } label: {
                                 VStack(alignment: .leading, spacing: 2) {
@@ -74,8 +78,17 @@ struct ContentView: View {
                             Button("清空") { history = []; HistoryStore.save([]) }.font(.caption)
                         }
                     }
-                    footer: { Text("点一条可重新下载。已解析过的链接不会重复下载。")
+                    footer: { Text("点一条可强制重新下载。清历史不影响“防重复下载”。")
                         .font(.caption).foregroundStyle(.secondary) }
+                }
+            }
+            .scrollDismissesKeyboard(.interactively)
+            .toolbar {
+                ToolbarItem(placement: .keyboard) {
+                    HStack {
+                        Spacer()
+                        Button("收起键盘") { linkFocused = false }
+                    }
                 }
             }
             .navigationTitle("抖音原画质")
@@ -85,9 +98,14 @@ struct ContentView: View {
 
     @MainActor
     private func process(id: String, force: Bool) async {
-        if !force, let dup = history.first(where: { $0.id == id }) {
-            status = "已解析过：\(dup.author)《\(dup.title)》，见历史（点它能重存）"
-            return
+        // B：按“视频ID + 文件是否存在”去重（与可见历史无关）
+        if !force, let known = DownloadStore.map()[id] {
+            if SavePaths.exists(known) {
+                status = "已下载过（文件还在）：\(known)，去 文件App 里看"
+                return
+            } else {
+                status = "之前下载过，但文件已不在，正在重新下载…"
+            }
         }
         busy = true
         defer { busy = false }
@@ -102,7 +120,13 @@ struct ContentView: View {
             status = "下载 \(best.width)x\(best.height)…"
             let file = try await svc.download(best.url)
             let name = Self.safeFileName(best.author, best.title, w: best.width, h: best.height)
-            status = Self.saveToDocuments(file, name: name)
+            let ok = SavePaths.write(file, name: name)
+            if ok {
+                DownloadStore.set(id, name)
+                status = "已保存到 文件App › 我的iPhone › DouyinGrab › \(name)"
+            } else {
+                status = "保存失败：无法写入自己的目录"; return
+            }
 
             let item = HistoryItem(id: best.id.isEmpty ? id : best.id,
                                    title: best.title, author: best.author,
@@ -114,16 +138,6 @@ struct ContentView: View {
         } catch {
             status = "失败：\(error.localizedDescription)"
         }
-    }
-
-    static func saveToDocuments(_ file: URL, name: String) -> String {
-        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        let dest = dir.appendingPathComponent(name)
-        try? FileManager.default.removeItem(at: dest)
-        if (try? FileManager.default.copyItem(at: file, to: dest)) != nil {
-            return "已保存到 文件App › 我的iPhone › DouyinGrab › \(name)"
-        }
-        return "保存失败：无法写入自己的目录"
     }
 
     static func safeFileName(_ author: String, _ title: String, w: Int, h: Int) -> String {
@@ -138,6 +152,31 @@ struct ContentView: View {
         if base.count > 48 { base = String(base.prefix(48)) }
         if base.isEmpty { base = "douyin_\(w)x\(h)_\(Int(Date().timeIntervalSince1970))" }
         return base + ".mp4"
+    }
+}
+
+enum SavePaths {
+    static var dir: URL {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+    }
+    static func exists(_ name: String) -> Bool {
+        FileManager.default.fileExists(atPath: dir.appendingPathComponent(name).path)
+    }
+    static func write(_ file: URL, name: String) -> Bool {
+        let dest = dir.appendingPathComponent(name)
+        try? FileManager.default.removeItem(at: dest)
+        return (try? FileManager.default.copyItem(at: file, to: dest)) != nil
+    }
+}
+
+enum DownloadStore {
+    private static let key = "downloadedMap"
+    static func map() -> [String: String] {
+        (UserDefaults.standard.dictionary(forKey: key) as? [String: String]) ?? [:]
+    }
+    static func set(_ id: String, _ name: String) {
+        var m = map(); m[id] = name
+        UserDefaults.standard.set(m, forKey: key)
     }
 }
 
